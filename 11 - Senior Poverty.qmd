@@ -1,0 +1,152 @@
+---
+title: "DEI ACS PUMS Data Checks - Indicator 11: Senior Poverty"
+author: "Kaitlan Wong"
+format: html
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidycensus) 
+library(tidyverse) 
+library(readxl) 
+library(writexl) 
+library(dplyr)
+```
+
+#### See <https://walker-data.com/census-r/analyzing-census-microdata.html> for guidance on using tidycensus to get ACS PUMS
+
+#### ACS PUMS Data Documentation: <https://www.census.gov/programs-surveys/acs/microdata/documentation.html>
+
+#### 2021 ACS Data Dictionary: <https://www2.census.gov/programs-surveys/acs/tech_docs/pums/data_dict/PUMS_Data_Dictionary_2021.pdf>
+
+Get 2021 ACS PUMS data.
+
+```{r}
+# Get ACS data
+pums21 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "POVPIP"),
+  state = "TX",
+  survey = "acs1",
+  year = 2021,
+  recode = TRUE,
+)
+
+# View data
+head(pums21)
+```
+
+Filter for Dallas PUMAs and mutate variables
+
+```{r}
+# Filter for Dallas PUMAs
+data21 <- pums21 %>%
+  filter(PUMA %in% c("02304", "02305", "02306", "02307", "02309", "02310", "02311", "02312", "02313", "02314", "02315", "02316", "02319", "01901", "02001"),
+         # filter for seniors 65+
+         AGEP >= 65) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)
+  ) %>%
+  mutate(pov = case_when(
+    POVPIP %in% c(0:100) ~ "At or below 100% poverty",
+    POVPIP < 0 ~ "NA",
+    TRUE ~ "Above 100% poverty")
+   )
+```
+
+Create table of counts and %s using person weight variable.
+
+```{r}
+# Calculate # and % of seniors in poverty by race/ethnicity
+summary21 <- data21 %>%
+  group_by(race_eth) %>%
+  summarize(
+    count_pov = sum(PWGTP[pov == "At or below 100% poverty"], na.rm = TRUE),
+    prop_pov = sum(PWGTP[pov == "At or below 100% poverty"], na.rm = TRUE) / sum(PWGTP)
+  )
+
+summary21
+
+
+# Calculate total # and % of seniors in poverty
+summary_all21 <- data21 %>%
+  summarize(
+    count_pov = sum(PWGTP[pov == "At or below 100% poverty"], na.rm = TRUE),
+    prop_pov = sum(PWGTP[pov == "At or below 100% poverty"], na.rm = TRUE) / sum(PWGTP)
+  )
+
+summary_all21
+```
+
+Repeat steps for 2019 data.
+
+```{r}
+# Get ACS data
+pums19 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "WKHP", "POVPIP"),
+  state = "TX",
+  survey = "acs1",
+  year = 2019,
+  recode = TRUE,
+)
+
+# View data
+head(pums19)
+```
+
+```{r}
+# Filter for Dallas PUMAs
+data19 <- pums19 %>%
+ filter(PUMA %in% c("02304", "02305", "02306", "02307", "02309", "02310", "02311", "02312", "02313", "02314", "02315", "02316", "02319", "01901", "02001"),
+         # filter for seniors 65+
+         AGEP >= 65) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)
+  ) %>%
+  mutate(pov = case_when(
+    POVPIP %in% c(0:100) ~ "At or below 100% poverty",
+    POVPIP < 0 ~ "NA",
+    TRUE ~ "Above 100% poverty")
+   )
+
+
+# Calculate # and % of seniors in poverty by race/ethnicity
+summary19 <- data19 %>%
+  group_by(race_eth) %>%
+  summarize(
+    count_pov = sum(PWGTP[pov == "At or below 100% poverty"], na.rm = TRUE),
+    prop_pov = sum(PWGTP[pov == "At or below 100% poverty"], na.rm = TRUE) / sum(PWGTP)
+  )
+
+summary19
+
+
+# Calculate total # and % of seniors in poverty
+summary_all19 <- data19 %>%
+  summarize(
+    count_pov = sum(PWGTP[pov == "At or below 100% poverty"], na.rm = TRUE),
+    prop_pov = sum(PWGTP[pov == "At or below 100% poverty"], na.rm = TRUE) / sum(PWGTP)
+  )
+
+summary_all19
+```
+
+```{r}
+# Export tables to Excel
+
+write_xlsx(list("2021" = summary21, "2019" = summary19), "11_Senior Poverty.xlsx")
+```

@@ -1,0 +1,174 @@
+---
+title: "DEI ACS PUMS Data Checks - Indicator 34: Private Vehicle Availability"
+author: "Kaitlan Wong"
+format: html
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidycensus) 
+library(tidyverse) 
+library(readxl) 
+library(writexl) 
+library(dplyr)
+```
+
+#### See <https://walker-data.com/census-r/analyzing-census-microdata.html> for guidance on using tidycensus to get ACS PUMS
+
+#### ACS PUMS Data Documentation: <https://www.census.gov/programs-surveys/acs/microdata/documentation.html>
+
+#### 2021 ACS Data Dictionary: <https://www2.census.gov/programs-surveys/acs/tech_docs/pums/data_dict/PUMS_Data_Dictionary_2021.pdf>
+
+Get 2021 ACS PUMS data.
+
+```{r}
+# Get ACS data
+pums21 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "VEH", "SERIALNO"),
+  state = "TX",
+  survey = "acs1",
+  year = 2021,
+  recode = TRUE,
+)
+
+# View data
+head(pums21)
+```
+
+Filter for Dallas PUMAs and mutate variables
+
+```{r}
+# Filter for Dallas PUMAs
+data21 <- pums21 %>%
+  filter(PUMA %in% c("02304", "02305", "02306", "02307", "02309", "02310", "02311", "02312", "02313", "02314", "02315", "02316", "02319", "01901", "02001"),
+         # Filter for people age 16+
+         AGEP >= 16,
+         # Remove N/A values from VEH variable
+         VEH >= 0) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)
+  )
+
+# Sum the number of individuals aged 16+ by household
+grouped_data21 <- data21 %>%
+  group_by(SERIALNO) %>%
+  summarise(HH_16up = n())
+
+# Join the sum of individuals with the original data and calculate the average vehicles per person aged 16+
+result_data21 <- data21 %>%
+  left_join(grouped_data21, by = "SERIALNO") %>%
+  group_by(SERIALNO) %>%
+  summarise(
+    average_vehicles = ifelse(as.numeric(VEH) == 0, 0, as.numeric(VEH) / HH_16up[1]),
+    HH_16up,
+    race_eth,
+    WGTP
+  )
+
+# Print the results showing average # vehicles per household
+print(result_data21)
+```
+
+Create table of counts and %s using household weight variable.
+
+```{r}
+library(matrixStats)
+
+# Calculate the average number of vehicles available per person aged 16+ by race/ethnicity of householder
+summary21 <- result_data21 %>%
+  group_by(race_eth) %>%
+  summarize(ave_veh = weighted.mean(average_vehicles, WGTP))
+
+summary21
+
+
+# Calculate the average number of vehicles available per person aged 16+ for all Dallas households
+summary_all21 <- result_data21 %>%
+  summarize(ave_veh = weighted.mean(average_vehicles, WGTP))
+
+summary_all21
+```
+
+Repeat steps for 2019 data.
+
+```{r}
+# Get ACS data
+pums19 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "VEH", "SERIALNO"),
+  state = "TX",
+  survey = "acs1",
+  year = 2019,
+  recode = TRUE,
+)
+
+# View data
+head(pums19)
+```
+
+```{r}
+# Filter for Dallas PUMAs
+data19 <- pums19 %>%
+  filter(PUMA %in% c("02304", "02305", "02306", "02307", "02309", "02310", "02311", "02312", "02313", "02314", "02315", "02316", "02319", "01901", "02001"),
+         # Filter for people age 16+
+         AGEP >= 16,
+         # Remove N/A values from VEH variable
+         VEH >= 0) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)
+  )
+
+# Sum the number of individuals aged 16+ by household
+grouped_data19 <- data19 %>%
+  group_by(SERIALNO) %>%
+  summarise(HH_16up = n())
+
+# Join the sum of individuals with the original data and calculate the average vehicles per person aged 16+
+result_data19 <- data19 %>%
+  left_join(grouped_data19, by = "SERIALNO") %>%
+  group_by(SERIALNO) %>%
+  summarise(
+    average_vehicles = ifelse(as.numeric(VEH) == 0, 0, as.numeric(VEH) / HH_16up[1]),
+    HH_16up,
+    race_eth,
+    WGTP
+  )
+
+
+
+library(matrixStats)
+
+# Calculate the average number of vehicles available per person aged 16+ by race/ethnicity of householder
+summary19 <- result_data19 %>%
+  group_by(race_eth) %>%
+  summarize(ave_veh = weighted.mean(average_vehicles, WGTP))
+
+summary19
+
+
+# Calculate the average number of vehicles available per person aged 16+ for all Dallas households
+summary_all19 <- result_data19 %>%
+  summarize(ave_veh = weighted.mean(average_vehicles, WGTP))
+
+summary_all19
+```
+
+```{r}
+# Export tables to Excel
+
+write_xlsx(list("2021" = summary21, "2019" = summary19), "34_Private Vehicle Availability.xlsx")
+```
