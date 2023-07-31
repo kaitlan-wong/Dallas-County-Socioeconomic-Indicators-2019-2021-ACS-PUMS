@@ -1,0 +1,252 @@
+---
+title: "DEI ACS PUMS Data Checks - Indicator 30: Utility Expenses - 2016 Final Version"
+author: "Kaitlan Wong, Edited by Coda Rayo-Garza"
+format: html
+editor: visual
+---
+
+### **Helpful Resources:**
+
+-   See <https://walker-data.com/census-r/analyzing-census-microdata.html> for guidance on using tidycensus to get ACS PUMS
+
+-   ACS PUMS Data Documentation: <https://www.census.gov/programs-surveys/acs/microdata/documentation.2016.html#list-tab-1370939201>
+
+-   2016 ACS Data Dictionary: <https://www2.census.gov/programs-surveys/acs/tech_docs/pums/data_dict/PUMSDataDict16.pdf>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidycensus) 
+library(tidyverse) 
+library(readxl) 
+library(writexl) 
+library(dplyr)
+```
+
+```{r}
+#Use this code to look up PUMS variables 
+view(pums_variables)
+```
+
+We will need:
+
+-   WATP: Water cost (yearly cost, use ADJHSG to adjust WATP to constant dollars)
+
+-   GASP: Gas cost (monthly cost, use ADJHSG to adjust GASP to constant dollars)
+
+-   FULP: Fuel cost (yearly cost for fuels other than gas and electricity, use ADJHSG to adjust FULP to constant dollars)
+
+-   ELEP: Electricity cost (monthly cost, use ADJHSG to adjust ELEP to constant
+
+    dollars)
+
+-   HINCP: Household Income in the past 12 months (ADJINC to adjust HINCP to constant dollars)
+
+-   ADJINC: Adjustment factor for income and earnings dollar amounts
+
+-   ADJHSG: Adjustment factor for housing dollar amounts (6 implied decimal places)
+
+```{r}
+#Pull PUMS data using tidycensus 
+u16 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "GASP", "FULP", "ELEP", "WATP", "ADJINC", "ADJHSG", "HINCP"),
+  state = "TX",
+  survey = "acs1",
+  year = 2016,
+  recode = TRUE,
+)
+
+# View data
+head(u16)
+```
+
+```{r}
+# check adjustment factor variables to see what format they are in (implied decimals vs. decimal format)
+
+u16$ADJHSG  # this is already in decimal format, so no need to divide by 1e+06 (unlike 2016 pums dataset)
+
+u16$ADJINC  # this is already in decimal format, so no need to divide by 1e+06
+```
+
+Filter for Dallas PUMAS
+
+```{r}
+pumas16 <- u16 %>%
+  filter(PUMA %in% c("2304", "2305", "2306", "2307", "2309", "2310", "2311", "2312", "2313", "2314", "2315", "2316", "2319", "1901", "2001")) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)) 
+```
+
+## Per PUMS, we need to make adjustments to get constant dollars for some of the variables
+
+One thing to note is that making the adjustments takes care of any potential negative values in the utilities vectors, so we don't need to worry about negative values. However, do double check for NA's.
+
+```{r}
+
+# Check for NAs in the dataframe
+has_na <- anyNA(pumas16)
+
+if (has_na) {
+  # If there are NAs, remove rows with NAs
+  pumas16 <- pumas16[complete.cases(pumas16), ]
+  print("NAs have been removed.")
+} else {
+  print("No NAs found in the dataframe.")
+}
+```
+
+```{r}
+# covert variables to numeric
+pumas16$ADJHSG <- as.numeric(pumas16$ADJHSG)
+pumas16$GASP <- as.numeric(pumas16$GASP)
+pumas16$ELEP <- as.numeric(pumas16$ELEP)
+pumas16$FULP <- as.numeric(pumas16$FULP)
+pumas16$WATP <- as.numeric(pumas16$WATP)
+
+# Make adjustments to get constant dollars 
+pumas16 <- pumas16 %>%
+  mutate(adj_gasp = GASP * ADJHSG,
+         adj_elep = ELEP * ADJHSG,
+         adj_fulp = FULP * ADJHSG,
+         adj_watp = WATP * ADJHSG )
+
+#Get annual costs for gas and electricity since these are originally monthly 
+pumas16<- pumas16 %>% mutate(gas = adj_gasp * 12) %>%
+  mutate(elec = adj_elep * 12) 
+
+#yearly costs for water (WATP) and yearly costs for fuel (FULP) don't need to be multiplied
+  
+  
+# Calculate total annual utility expenses after adjustment for each household
+pumas16 <- pumas16 %>%
+  mutate(total_annual_utility_expenses = gas + elec + adj_fulp + adj_watp)
+
+
+# Calculate weighted total annual costs by race/ethnicity
+total_costs_by_race <- pumas16 %>%
+  group_by(race_eth) %>%
+  summarize(weighted_total_annual_costs = sum(total_annual_utility_expenses * WGTP, na.rm = TRUE) / sum(WGTP, na.rm = TRUE))
+
+# View the results -- REMINDER, this is total costs 
+print(total_costs_by_race)
+
+
+
+
+```
+
+## Now, to Get Median Utility Expenses
+
+```{r}
+
+# Code 1 (I tried several, including using the scales package and that was not successful)
+
+# Calculate the weighted median annual costs by race/ethnicity
+weighted_median <- function(x, w) {
+  x <- sort(x)
+  w <- w[order(x)]
+  n <- sum(w)
+  cum_w <- cumsum(w)
+  threshold <- n / 2
+  median_index <- which(cum_w >= threshold)[1]
+  median_value <- x[median_index]
+  median_value
+}
+
+median_costs_by_race <- pumas16 %>%
+  group_by(race_eth) %>%
+  summarize(median_annual_costs = weighted_median(total_annual_utility_expenses, w = WGTP))
+
+# View the results
+print(median_costs_by_race)
+
+
+
+```
+
+## Now about HH Income...
+
+Here we do have to worry about negative numbers. So, we make the adjustment using ADJINC and filter out negative incomes.
+
+```{r}
+# Double Checking for Lonely PSU's (a "Lonely PSU" refers to a unique situation where a Public Use Microdata Area (PUMA) contains only one Primary Sampling Unit (PSU))
+psu_counts <- table(pumas16$PSU)
+
+# Find the PSUs with only one sampled unit (lonely PSUs)
+lonely_psus <- psu_counts[psu_counts == 1]
+
+# Print the lonely PSUs, if any
+if (length(lonely_psus) > 0) {
+  print(paste("Lonely PSUs:", paste(names(lonely_psus), collapse = ", ")))
+} else {
+  print("No lonely PSUs found.")
+}
+
+
+#all good 
+```
+
+### Getting Median Household Income
+
+```{r}
+library(dplyr)
+library(srvyr)
+
+# covert variables to numeric
+pumas16$ADJINC <- as.numeric(pumas16$ADJINC)
+pumas16$HINCP <- as.numeric(pumas16$HINCP)
+
+# Remove households with income less than $0
+pumas16 <- pumas16 %>% filter(HINCP >=0)
+
+
+# Conver ADJINC to numeric
+pumas16$ADJINC <- as.numeric(pumas16$ADJINC)
+
+
+# Adjust household income (HINCP) to constant dollars using 'ADJINC'
+# Remember, ADJINC is already in decimal format, so no need to divide by 1e+06
+pumas16 <- pumas16 %>%
+  mutate(adj_hincp = HINCP * ADJINC)
+
+pumas16$adj_hincp <- as.numeric(pumas16$adj_hincp)
+
+
+
+# Group the data by 'race_eth' and calculate the median adjusted household income
+median_income_by_race <- pumas16 %>%
+  group_by(race_eth) %>%
+  summarize(median_adj_hincp = median(adj_hincp))
+
+# Print the result
+print(median_income_by_race)
+```
+
+### Finally, calculate the median percent of income spent on utilities
+
+```{r}
+
+# Calculate the percentage of income spent on utilities
+pumas16 <- pumas16 %>%
+  mutate(percent_income_utilities = total_annual_utility_expenses / adj_hincp)
+
+# Group the data by 'race_eth' and calculate the median percentage of income spent on utilities
+median_percent_income_utilities_by_race <- pumas16 %>%
+  group_by(race_eth) %>%
+  summarize(median_percent_utilities = weighted_median(percent_income_utilities, w = WGTP))
+
+# Print the result
+print(median_percent_income_utilities_by_race)
+```
+
+```{r}
+# Export table to Excel
+
+write_xlsx(list("med_inc" = median_income_by_race, "med_util" = median_costs_by_race, "percent_inc" = median_percent_income_utilities_by_race), "30_Utility Expenses_2016.xlsx")
+```
