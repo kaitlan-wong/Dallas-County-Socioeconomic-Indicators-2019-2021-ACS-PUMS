@@ -1,0 +1,126 @@
+---
+title: "DEI ACS PUMS Data Checks - Indicator 6: High-Growth, High-Paying Employment - 2016-2017"
+author: "Kaitlan Wong"
+format: html
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidycensus) 
+library(tidyverse) 
+library(readxl) 
+library(writexl) 
+library(dplyr)
+```
+
+See https://walker-data.com/census-r/analyzing-census-microdata.html
+
+Get 2017 ACS PUMS data.
+
+```{r}
+# Get ACS data
+pums17 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "SOCP"),
+  state = "TX",
+  survey = "acs1",
+  year = 2017,
+  recode = TRUE,
+)
+
+# View data
+head(pums17)
+```
+
+Filter for Dallas PUMAs and mutate variables
+
+```{r}
+# Filter for Dallas PUMAs and working-age adults
+data17 <- pums17 %>%
+  filter(PUMA %in% c("02304", "02305", "02306", "02307", "02309", "02310", "02311", "02312", "02313", "02314", "02315", "02316", "02319", "01901", "02001"),
+         AGEP >= 25 & AGEP <= 64) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)
+  ) %>%
+   mutate(hghp = case_when(
+     str_detect(SOCP, "^(11|23|15|17|29|13|16)") ~ "HGHP",
+     TRUE ~ "Not HGHP")
+   )
+     
+```
+
+Create table of counts and %s using person weight variable.
+
+```{r}
+# Calculate summary statistics
+summary17 <- data17 %>%
+  group_by(race_eth) %>%
+  summarize(
+    count_hghp = sum(PWGTP[hghp == "HGHP"]),
+    prop_hghp = sum(PWGTP[hghp == "HGHP"]) / sum(PWGTP)
+  )
+
+summary17
+```
+
+Repeat steps for 2016 data.
+
+```{r}
+# Get ACS data
+pums16 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "SOCP"),
+  state = "TX",
+  survey = "acs1",
+  year = 2016,
+  recode = TRUE,
+)
+
+# View data
+head(pums16)
+```
+
+```{r}
+# Filter for Dallas PUMAs and working-age adults
+data16 <- pums16 %>%
+  filter(PUMA %in% c("2304", "2305", "2306", "2307", "2309", "2310", "2311", "2312", "2313", "2314", "2315", "2316", "2319", "1901", "2001"),
+         AGEP >= 25 & AGEP <= 64) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)
+  ) %>%
+    mutate(hghp = case_when(
+     str_detect(SOCP, "^(11|23|15|17|29|13|16)") ~ "HGHP",
+     TRUE ~ "Not HGHP")
+   )
+
+# Calculate summary statistics
+summary16 <- data16 %>%
+  group_by(race_eth) %>%
+  summarize(
+    count_hghp = sum(PWGTP[hghp == "HGHP"]),
+    prop_hghp = sum(PWGTP[hghp == "HGHP"]) / sum(PWGTP)
+  )
+
+summary16
+```
+
+Export tables to Excel.
+
+```{r}
+# Export tables to Excel
+
+write_xlsx(list("2017" = summary17, "2016" = summary16), "06_HGHP Jobs_16_17.xlsx")
+```
