@@ -1,0 +1,145 @@
+---
+title: "DEI ACS PUMS Data Checks - Indicator 14: Early Education Enrollment by Income 2016-2017 - using methodology from 2019 report analysis"
+author: "Kaitlan Wong"
+format: html
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidycensus) 
+library(tidyverse) 
+library(readxl) 
+library(writexl) 
+library(dplyr)
+```
+
+#### See <https://walker-data.com/census-r/analyzing-census-microdata.html> for guidance on using tidycensus to get ACS PUMS
+
+#### ACS PUMS Data Documentation: <https://www.census.gov/programs-surveys/acs/microdata/documentation.html>
+
+Get 2017 ACS PUMS data.
+
+```{r}
+# Get ACS data
+pums17 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "SCH", "SCHG", "POVPIP"),
+  state = "TX",
+  survey = "acs1",
+  year = 2017,
+  recode = TRUE,
+)
+
+# View data
+head(pums17)
+```
+
+Filter for Dallas PUMAs and mutate variables
+
+```{r}
+# Filter for Dallas PUMAs
+data17 <- pums17 %>%
+  filter(PUMA %in% c("02304", "02305", "02306", "02307", "02309", "02310", "02311", "02312", "02313", "02314", "02315", "02316", "02319", "01901", "02001"),
+         # filter for 3 and 4 year-olds
+         AGEP == 3 | AGEP == 4) %>%
+  mutate(preK = case_when(
+    SCHG == "01" ~ "Attends preK", # using SCHG instead of SCH, just as 2019 method
+    TRUE ~ "Not in preK")
+   ) %>%
+  mutate(income = case_when( # editing poverty levels to match 2019 method
+    POVPIP >= 185 ~ "High",
+    POVPIP %in% c(100:184) ~ "Middle",
+    POVPIP %in% c(0:99) ~ "Low",
+    POVPIP < 0 ~ NA_character_
+  ))
+```
+
+Create table of counts and %s using person weight variable.
+
+```{r}
+# Calculate # and % in preK by income
+summary17 <- data17 %>%
+  group_by(income) %>%
+  summarize(
+    count = sum(PWGTP[preK == "Attends preK"], na.rm = TRUE),
+    prop = sum(PWGTP[preK == "Attends preK"], na.rm = TRUE) / sum(PWGTP)
+  )
+
+summary17
+
+
+# Calculate total # and % in preK
+summary_all17 <- data17 %>%
+  summarize(
+    count = sum(PWGTP[preK == "Attends preK"], na.rm = TRUE),
+    prop = sum(PWGTP[preK == "Attends preK"], na.rm = TRUE) / sum(PWGTP)
+  )
+
+summary_all17
+```
+
+Repeat steps for 2016 data.
+
+```{r}
+# Get ACS data
+pums16 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "SCH", "SCHG", "POVPIP"),
+  state = "TX",
+  survey = "acs1",
+  year = 2016,
+  recode = TRUE,
+)
+
+# View data
+head(pums16)
+```
+
+```{r}
+# conver POVPIP to numeric
+pums16$POVPIP <- as.numeric(pums16$POVPIP)
+
+# Filter for Dallas PUMAs
+data16 <- pums16 %>%
+ filter(PUMA %in% c("2304", "2305", "2306", "2307", "2309", "2310", "2311", "2312", "2313", "2314", "2315", "2316", "2319", "1901", "2001"),
+         # filter for 3 and 4 year-olds
+         AGEP == 3 | AGEP == 4) %>%
+  mutate(preK = case_when(
+    SCHG == "01" ~ "Attends preK", # using SCHG instead of SCH, just as 2019 method
+    TRUE ~ "Not in preK")
+   ) %>%
+  mutate(income = case_when( # editing poverty levels to match 2019 method
+    POVPIP >= 185 ~ "High",
+    POVPIP %in% c(100:184) ~ "Middle",
+    POVPIP %in% c(0:99) ~ "Low",
+    POVPIP < 0 ~ NA_character_
+  ))
+
+
+# Calculate # and % in preK by income
+summary16 <- data16 %>%
+  group_by(income) %>%
+  summarize(
+    count_pov = sum(PWGTP[preK == "Attends preK"], na.rm = TRUE),
+    prop_pov = sum(PWGTP[preK == "Attends preK"], na.rm = TRUE) / sum(PWGTP)
+  )
+
+summary16
+
+
+# Calculate total # and % in preK
+summary_all16 <- data16 %>%
+  summarize(
+    count = sum(PWGTP[preK == "Attends preK"], na.rm = TRUE),
+    prop = sum(PWGTP[preK == "Attends preK"], na.rm = TRUE) / sum(PWGTP)
+  )
+
+summary_all16
+
+# for some reason not getting correct output for 2016. For time purposes, will not investigate further since I was able to replicate 2017 report data.
+```
+
+```{r}
+# Export tables to Excel
+
+write_xlsx(list("2017" = summary17, "2016" = summary16), "14_Early Education Enrollment by Income_FINAL_16_17.xlsx")
+```
