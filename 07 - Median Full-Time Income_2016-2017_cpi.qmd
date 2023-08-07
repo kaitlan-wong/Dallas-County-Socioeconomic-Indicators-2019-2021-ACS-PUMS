@@ -1,0 +1,152 @@
+---
+title: "DEI ACS PUMS Data Checks - Indicator 7: Median Full-Time Income 2016-2017"
+author: "Kaitlan Wong"
+format: html
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidycensus) 
+library(tidyverse) 
+library(readxl) 
+library(writexl) 
+library(dplyr)
+```
+
+See https://walker-data.com/census-r/analyzing-census-microdata.html
+
+Get 2017 ACS PUMS data.
+
+```{r}
+# Get ACS data
+pums17 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "WKHP", "WAGP", "ESR"),
+  state = "TX",
+  survey = "acs1",
+  year = 2017,
+  recode = TRUE,
+)
+
+# View data
+head(pums17)
+```
+
+Filter for Dallas PUMAs and mutate variables
+
+```{r}
+# Filter for Dallas PUMAs and working-age adults
+data17 <- pums17 %>%
+  filter(PUMA %in% c("02304", "02305", "02306", "02307", "02309", "02310", "02311", "02312", "02313", "02314", "02315", "02316", "02319", "01901", "02001"),
+         AGEP >= 25 & AGEP <= 64,
+         # employed adults
+         ESR %in% c(1,2,4,5),
+         # usually work 30+ hours/week
+         WKHP >= 30) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)
+  )
+     
+```
+
+Create table of counts and %s using person weight variable.
+
+```{r}
+library(matrixStats)
+
+# Calculate median income by race/ethnicity
+
+summary17 <- data17 %>%
+  group_by(race_eth) %>%
+  summarize(
+    median_inc = weightedMedian(WAGP, PWGTP)
+  )
+
+summary17
+
+```
+
+```{r}
+# Calculate the weighted median for all people
+summary_all <- data17 %>%
+  summarize(
+    median_inc = weightedMedian(WAGP, PWGTP)
+  )
+
+summary_all
+```
+
+Repeat steps for 2016 data.
+
+```{r}
+# Get ACS data
+pums16 <- get_pums(
+  variables = c("AGEP", "RAC1P", "HISP", "PUMA", "WKHP", "WAGP", "ESR"),
+  state = "TX",
+  survey = "acs1",
+  year = 2016,
+  recode = TRUE,
+)
+
+# View data
+head(pums16)
+```
+
+```{r}
+# Filter for Dallas PUMAs and working-age adults
+data16 <- pums16 %>%
+  filter(PUMA %in% c("2304", "2305", "2306", "2307", "2309", "2310", "2311", "2312", "2313", "2314", "2315", "2316", "2319", "1901", "2001"),
+         AGEP >= 25 & AGEP <= 64,
+         # employed adults
+         ESR %in% c(1,2,4,5),
+         # usually work 30+ hours/week
+         WKHP >= 30) %>%
+  # recode race/ethnicity
+  mutate(race_eth = case_when(
+    HISP != "01" ~ "Hispanic",
+    HISP == "01" & RAC1P == "1" ~ "White, non-Hispanic",
+    HISP == "01" & RAC1P == "2" ~ "Black, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("3","4","5") ~ "AIAN, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("6","7") ~ "Asian or Pacific Islander, non-Hispanic",
+    HISP == "01" & RAC1P %in% c("8","9") ~ "Other, non-Hispanic",
+    TRUE ~ NA_character_)
+  )
+
+
+# Adjust for inflation
+inflation_factor <- 1.05
+
+data16$WAGP <- as.numeric(data16$WAGP)
+
+# Calculate median income by race/ethnicity (inflation-adjusted)
+summary16 <- data16 %>%
+  group_by(race_eth) %>%
+  summarize(
+    median_inc = weightedMedian(WAGP * inflation_factor, PWGTP)
+  )
+
+summary16
+
+# Calculate the weighted median for all people (inflation-adjusted)
+summary_all16 <- data16 %>%
+  summarize(
+    median_inc = weightedMedian(WAGP * inflation_factor, PWGTP)
+  )
+
+summary_all16
+```
+
+Export tables to Excel.
+
+```{r}
+# Export tables to Excel
+
+write_xlsx(list("2017" = summary17, "2016" = summary16), "07_Median Full-Time Income_16_17.xlsx")
+```
